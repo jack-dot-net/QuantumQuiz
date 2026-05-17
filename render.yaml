@@ -1,0 +1,21 @@
+services:
+  - type: web
+    name: quantumquiz
+    runtime: static
+    buildCommand: ""
+    staticPublishPath: ./public
+    pullRequestPreviewsEnabled: true
+    headers:
+      - path: /*
+        name: X-Frame-Options
+        value: SAMEORIGIN
+      - path: /*
+        name: X-Content-Type-Options
+        value: nosniff
+      - path: /*.jsx
+        name: Content-Type
+        value: text/babel; charset=utf-8
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html

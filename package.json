@@ -1,0 +1,10 @@
+{
+  "name": "quantumquiz",
+  "version": "1.0.0",
+  "private": true,
+  "description": "QuantumQuiz — retro-arcade multiplayer trivia & impostor prototype",
+  "scripts": {
+    "start": "npx --yes serve public -l ${PORT:-3000}",
+    "dev": "npx --yes serve public -l 3000"
+  }
+}
