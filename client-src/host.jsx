@@ -6,7 +6,7 @@
   const { useState, useEffect, useMemo } = React;
 
   function HostScreen({ store }) {
-    const { room, self } = store;
+    const { room, self, private: priv } = store;
     if (!room) return null;
     const joinUrl = useMemo(() => {
       const u = new URL(window.location.origin + '/');
@@ -19,7 +19,7 @@
         <HostTopBar room={room} self={self} />
         <div className="host-stage tv-screen">
           <div className="tv-inner">
-            <HostSwitch room={room} self={self} joinUrl={joinUrl} />
+            <HostSwitch room={room} self={self} priv={priv} joinUrl={joinUrl} />
           </div>
         </div>
         <HostFootBar room={room} />
@@ -70,17 +70,17 @@
     );
   }
 
-  function HostSwitch({ room, self, joinUrl }) {
+  function HostSwitch({ room, self, priv, joinUrl }) {
     switch (room.state) {
       case 'lobby':                return <Lobby room={room} self={self} joinUrl={joinUrl} />;
-      case 'trivia-question':      return <TriviaQuestion room={room} self={self} />;
-      case 'trivia-reveal':        return <TriviaReveal room={room} self={self} />;
+      case 'trivia-question':      return <TriviaQuestion room={room} self={self} priv={priv} />;
+      case 'trivia-reveal':        return <TriviaReveal room={room} self={self} priv={priv} />;
       case 'trivia-leaderboard':   return <TriviaLeaderboard room={room} />;
       case 'trivia-podium':        return <TriviaPodium room={room} />;
-      case 'impostor-reveal':      return <ImpostorReveal room={room} />;
-      case 'impostor-clues':       return <ImpostorClues room={room} />;
-      case 'impostor-vote':        return <ImpostorVote room={room} />;
-      case 'impostor-bonus':       return <ImpostorBonus room={room} />;
+      case 'impostor-reveal':      return <ImpostorReveal room={room} priv={priv} />;
+      case 'impostor-clues':       return <ImpostorClues room={room} priv={priv} />;
+      case 'impostor-vote':        return <ImpostorVote room={room} priv={priv} />;
+      case 'impostor-bonus':       return <ImpostorBonus room={room} priv={priv} />;
       case 'impostor-result':      return <ImpostorResult room={room} />;
       default:                     return <div className="mono ink-dim">unknown state: {room.state}</div>;
     }
@@ -260,13 +260,15 @@
   }
 
   // ─── Trivia ────────────────────────────────────────────────────────────────
-  function TriviaQuestion({ room }) {
+  function TriviaQuestion({ room, priv }) {
     const seconds = useCountdown(room.phaseEndsAt) || 0;
     const total = room.settings.timePerQuestion;
     const q = room.trivia?.question;
     if (!q) return null;
     const answered = room.trivia.answeredCount;
     const totalPlayers = room.players.filter(p => p.connected).length;
+    const picked = priv?.myAnswer?.choice ?? null;
+    const locked = !!priv?.myAnswer;
     return (
       <div className="scene-full">
         <div className="scene-head">
@@ -280,13 +282,29 @@
         <div className="trivia-question-body">
           <h2 className="h-display trivia-q-text">{q.text}</h2>
           <div className="trivia-options">
-            {q.options.map((opt, i) => (
-              <div key={i} className={`ans ${['a','b','c','d'][i]}`} style={{ pointerEvents: 'none' }}>
-                <div className="shape">{['A','B','C','D'][i]}</div>
-                <div style={{ flex: 1 }}>{opt}</div>
-                <div className="mono ink-mute">{['A','B','C','D'][i]}</div>
-              </div>
-            ))}
+            {q.options.map((opt, i) => {
+              const isPicked = picked === i;
+              return (
+                <button
+                  key={i}
+                  className={`ans ${['a','b','c','d'][i]} ${isPicked ? 'picked' : ''}`}
+                  disabled={locked}
+                  onClick={() => QQ.actions.answer(i)}
+                  style={{
+                    borderColor: isPicked ? 'var(--magenta)' : undefined,
+                    background: isPicked ? 'rgba(255,46,136,0.15)' : undefined,
+                    boxShadow: isPicked ? 'var(--glow-m)' : undefined,
+                    cursor: locked ? 'not-allowed' : 'pointer',
+                  }}
+                >
+                  <div className="shape">{['A','B','C','D'][i]}</div>
+                  <div style={{ flex: 1 }}>{opt}</div>
+                  {isPicked
+                    ? <span className="mono magenta small">✓ LOCKED</span>
+                    : <span className="mono ink-mute">{['A','B','C','D'][i]}</span>}
+                </button>
+              );
+            })}
           </div>
         </div>
         <div className="scene-foot">
@@ -454,8 +472,11 @@
   }
 
   // ─── Impostor ──────────────────────────────────────────────────────────────
-  function ImpostorReveal({ room }) {
+  function ImpostorReveal({ room, priv }) {
     const seconds = useCountdown(room.phaseEndsAt) || 0;
+    const [shown, setShown] = useState(false);
+    const role = priv?.impostor?.role;
+    const word = priv?.impostor?.myWord;
     return (
       <div className="scene-full">
         <div className="scene-head">
@@ -466,7 +487,7 @@
           <div className="bignum purple-glow" style={{ fontSize: 64 }}>{String(seconds).padStart(2, '0')}</div>
         </div>
         <div className="impostor-reveal-body">
-          <div className="eyebrow ink-dim">CHECK YOUR PHONE · DO NOT SHOW OTHERS</div>
+          <div className="eyebrow ink-dim">YOUR WORD IS PRIVATE · DO NOT SHOW OTHERS</div>
           <div className="theme-card purple-glow">
             <div>
               <div className="mono ink-mute label-min">THEME</div>
@@ -475,9 +496,38 @@
             <div className="theme-divider"></div>
             <div>
               <div className="mono ink-mute label-min">YOUR ROLE</div>
-              <div className="mono cyan" style={{ fontSize: 18, marginTop: 4 }}>SECRET · UNIQUE PER PLAYER</div>
+              <div className="mono cyan" style={{ fontSize: 18, marginTop: 4 }}>
+                {shown ? (role === 'impostor' ? 'IMPOSTOR' : 'CREW') : 'SECRET'}
+              </div>
             </div>
           </div>
+          {word && (
+            <button onClick={() => setShown(s => !s)} className={`reveal-box ${shown ? 'shown' : ''}`}
+              style={{ maxWidth: 480, width: '100%' }}>
+              {!shown ? (
+                <>
+                  <div className="mono purple-glow small label-min" style={{ marginBottom: 12 }}>TAP TO REVEAL</div>
+                  <div className="h-display" style={{ fontSize: 28, color: 'var(--ink-dim)' }}>● ● ● ● ●</div>
+                  <div className="mono ink-mute small label-min" style={{ marginTop: 12 }}>YOUR SECRET WORD</div>
+                </>
+              ) : (
+                <>
+                  <div className="mono small label-min" style={{
+                    color: role === 'impostor' ? 'var(--magenta)' : 'var(--lime)',
+                    marginBottom: 12,
+                  }}>
+                    YOUR ROLE · {role === 'impostor' ? 'IMPOSTOR' : 'CREW'}
+                  </div>
+                  <div className="h-display" style={{
+                    fontSize: 42,
+                    color: role === 'impostor' ? 'var(--magenta)' : 'var(--lime)',
+                    textShadow: role === 'impostor' ? 'var(--glow-m)' : 'var(--glow-l)',
+                    wordBreak: 'break-word',
+                  }}>{word}</div>
+                </>
+              )}
+            </button>
+          )}
           <div className="impostor-grid">
             {room.players.filter(p => p.connected).map(p => (
               <div key={p.id} className="player-chip mini">
@@ -497,17 +547,35 @@
     );
   }
 
-  function ImpostorClues({ room }) {
+  function ImpostorClues({ room, priv }) {
     const im = room.impostor;
     const seconds = useCountdown(room.phaseEndsAt) || 0;
     const currentPlayer = room.players.find(p => p.id === im.currentTurnPlayerId);
     const total = im.turnOrder.length * im.cluesPerPlayer;
+    const isMyTurn = priv?.impostor?.isMyTurn;
+    const [clue, setClue] = useState('');
+    function submitClue(e) {
+      e.preventDefault();
+      const w = clue.trim();
+      if (!w) return;
+      QQ.actions.clue(w);
+      setClue('');
+    }
     return (
       <div className="scene-full">
         <div className="scene-head">
           <div>
             <div className="eyebrow purple">◆ CLUE PHASE</div>
             <h2 className="h-display" style={{ fontSize: 'clamp(26px, 3.5vw, 38px)', margin: '6px 0 0' }}>Drop your hint</h2>
+            {priv?.impostor?.myWord && (
+              <div className="mono ink-mute small" style={{ marginTop: 8 }}>
+                YOUR WORD ·{' '}
+                <span style={{
+                  color: priv.impostor.role === 'impostor' ? 'var(--magenta)' : 'var(--lime)',
+                  fontWeight: 700,
+                }}>{priv.impostor.myWord}</span>
+              </div>
+            )}
           </div>
           <div className="row gap" style={{ alignItems: 'center' }}>
             {currentPlayer && (
@@ -519,6 +587,16 @@
             <TimerRing seconds={seconds} total={25} size={72} color="magenta" />
           </div>
         </div>
+        {isMyTurn && (
+          <form className="p-turn-input" onSubmit={submitClue} style={{ maxWidth: 480, alignSelf: 'center', width: '100%' }}>
+            <div className="mono magenta-glow small label-min">◆ YOUR TURN — TYPE 1 WORD</div>
+            <input value={clue}
+              onChange={e => setClue(e.target.value.replace(/\s/g, '').slice(0, 12))}
+              className="mono clue-input" autoFocus placeholder="word" />
+            <div className="mono ink-mute small" style={{ textAlign: 'right' }}>{clue.length}/12 · NO PHRASES</div>
+            <button type="submit" className="btn btn-primary btn-block btn-sm" disabled={!clue.trim()}>DROP CLUE →</button>
+          </form>
+        )}
         <div className="impostor-clues-grid">
           <div className="card panel">
             <div className="eyebrow" style={{ marginBottom: 14 }}>CLUES GIVEN · {im.clues.length}/{total}</div>
@@ -570,11 +648,13 @@
     );
   }
 
-  function ImpostorVote({ room }) {
+  function ImpostorVote({ room, priv }) {
     const im = room.impostor;
     const seconds = useCountdown(room.phaseEndsAt) || 0;
     const connected = room.players.filter(p => p.connected);
     const totalVotes = im.voteCount;
+    const myVote = priv?.impostor?.myVote;
+    const myId = priv?.playerId;
     return (
       <div className="scene-full">
         <div className="scene-head">
@@ -582,21 +662,35 @@
             <div className="eyebrow magenta-glow">◆ VOTE PHASE</div>
             <h2 className="h-display" style={{ fontSize: 'clamp(28px, 4vw, 40px)', margin: '6px 0 0' }}>Who's the impostor?</h2>
             <div className="mono ink-mute small" style={{ marginTop: 6 }}>
-              REVIEW THE CLUES · CAST ON YOUR PHONE · MAJORITY DECIDES
+              REVIEW THE CLUES · TAP A SUSPECT · MAJORITY DECIDES
             </div>
           </div>
           <TimerRing seconds={seconds} total={30} size={84} color="magenta" />
         </div>
         <div className="vote-grid">
           {connected.map(p => {
-            // Show vote received count (only after resolution); during vote, just show submitted count
-            const voted = totalVotes;
+            const isSelf = p.id === myId;
+            const isPicked = myVote === p.id;
             return (
-              <div key={p.id} className="vote-tile" style={{ borderColor: 'var(--line)' }}>
+              <button key={p.id}
+                className={`vote-tile ${isPicked ? 'selected' : ''}`}
+                disabled={isSelf}
+                onClick={() => !isSelf && QQ.actions.vote(p.id)}
+                style={{
+                  borderColor: isPicked ? 'var(--magenta)' : 'var(--line)',
+                  boxShadow: isPicked ? 'var(--glow-m)' : 'none',
+                  background: isPicked ? 'rgba(255,46,136,0.15)' : 'var(--panel-2)',
+                  opacity: isSelf ? 0.45 : 1,
+                  cursor: isSelf ? 'not-allowed' : 'pointer',
+                  color: 'var(--ink)',
+                  fontFamily: 'inherit',
+                }}>
                 <Avatar name={p.name} hue={p.hue} shape={p.shape} size="lg" />
                 <div className="nm small">{p.name}</div>
-                <div className="mono ink-mute small">awaiting…</div>
-              </div>
+                <div className="mono small" style={{ color: isPicked ? 'var(--magenta)' : 'var(--ink-mute)' }}>
+                  {isSelf ? 'YOU' : isPicked ? '✓ VOTED' : 'TAP TO VOTE'}
+                </div>
+              </button>
             );
           })}
         </div>
@@ -622,29 +716,57 @@
     );
   }
 
-  function ImpostorBonus({ room }) {
+  function ImpostorBonus({ room, priv }) {
     const seconds = useCountdown(room.phaseEndsAt) || 0;
     const im = room.impostor;
     const impostor = room.players.find(p => p.id === im.impostorId);
+    const amImpostor = priv?.impostor?.role === 'impostor';
+    const [guess, setGuess] = useState('');
+    function submitGuess(e) {
+      e.preventDefault();
+      const w = guess.trim();
+      if (!w) return;
+      QQ.actions.bonusGuess(w);
+    }
     return (
       <div className="scene-full">
         <div className="scene-head">
           <div>
             <div className="eyebrow magenta-glow">◆ BONUS · IMPOSTOR'S LAST CHANCE</div>
             <h2 className="h-display" style={{ fontSize: 'clamp(28px, 4vw, 42px)', margin: '6px 0 0' }}>
-              {impostor ? impostor.name : 'Impostor'} guesses the crew's word
+              {amImpostor
+                ? 'You were caught — guess the crew word'
+                : `${impostor ? impostor.name : 'Impostor'} guesses the crew's word`}
             </h2>
           </div>
           <TimerRing seconds={seconds} total={25} size={84} color="magenta" />
         </div>
         <div className="bonus-body">
-          <div className="card panel bracket m" style={{ padding: 32 }}>
-            <div className="mono ink-mute label-min">CORRECT → STEALS THE WIN · WRONG → CREW BONUS</div>
-            <div className="h-display" style={{ fontSize: 60, color: 'var(--magenta)', textShadow: 'var(--glow-m)', marginTop: 16 }}>
-              "<span className="flicker">_</span>"
+          {amImpostor ? (
+            <form onSubmit={submitGuess} className="card panel bracket m"
+              style={{ padding: 28, maxWidth: 560, width: '100%', display: 'flex', flexDirection: 'column', gap: 14 }}>
+              <div className="mono ink-mute label-min">CORRECT → STEALS THE WIN · WRONG → CREW BONUS</div>
+              <div className="mono ink-mute small">
+                Theme: <span className="ink-dim">{im.theme}</span> · Your word was{' '}
+                <span style={{ color: 'var(--magenta)' }}>{priv?.impostor?.myWord}</span>
+              </div>
+              <input value={guess}
+                onChange={e => setGuess(e.target.value.toUpperCase().slice(0, 30))}
+                className="mono clue-input" autoFocus placeholder="CREW WORD"
+                style={{ fontSize: 28 }} />
+              <button type="submit" className="btn btn-primary btn-block" disabled={!guess.trim()}>
+                LOCK GUESS →
+              </button>
+            </form>
+          ) : (
+            <div className="card panel bracket m" style={{ padding: 32 }}>
+              <div className="mono ink-mute label-min">CORRECT → STEALS THE WIN · WRONG → CREW BONUS</div>
+              <div className="h-display" style={{ fontSize: 60, color: 'var(--magenta)', textShadow: 'var(--glow-m)', marginTop: 16 }}>
+                "<span className="flicker">_</span>"
+              </div>
+              <div className="mono ink-mute" style={{ marginTop: 14 }}>Watching the impostor's phone…</div>
             </div>
-            <div className="mono ink-mute" style={{ marginTop: 14 }}>Watching the impostor's phone…</div>
-          </div>
+          )}
         </div>
       </div>
     );
