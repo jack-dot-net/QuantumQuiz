@@ -1,955 +1,741 @@
-// QuantumQuiz — Host TV screen scenes
-// window.QQHost = HostScreen({ scene, state, dispatch })
+// QuantumQuiz — Host display. Big-screen TV-style view of the live room state.
+// Renders whichever scene the server says we're in.
 
-(function() {
-  const { Avatar, QR, TimerRing, Bar, Soundwave, Label } = window.QQShared;
-  const { players, question, answerDistribution, chat, impostor, voteResults } = window.QQ_DATA;
+(function () {
+  const { Avatar, QR, TimerRing, Bar, Soundwave, Label, Confetti, useCountdown } = window.QQShared;
+  const { useState, useEffect, useMemo } = React;
 
-  function HostScreen({ scene, state, dispatch }) {
+  function HostScreen({ store }) {
+    const { room, self } = store;
+    if (!room) return null;
+    const joinUrl = useMemo(() => {
+      const u = new URL(window.location.origin + '/');
+      u.searchParams.set('code', room.code);
+      return u.toString();
+    }, [room.code]);
+
     return (
-      <div className="host-col">
-        <Label color="magenta">HOST DISPLAY · BIG SCREEN</Label>
-        <div className="tv">
-          <div className="tv-screen">
-            <div className="tv-inner">
-              <SceneSwitcher scene={scene} state={state} dispatch={dispatch} />
-            </div>
+      <div className="host-shell">
+        <HostTopBar room={room} self={self} />
+        <div className="host-stage tv-screen">
+          <div className="tv-inner">
+            <HostSwitch room={room} self={self} joinUrl={joinUrl} />
           </div>
-          <div className="tv-foot">
-            <span className="tv-foot-dot"></span>
-            <span>QUANTUMQUIZ // HOST v1.0</span>
-            <span style={{ marginLeft: 'auto' }}>ROOM · {state.roomCode}</span>
-            <span>{state.players.filter(p => p.connected).length}/12 PLAYERS</span>
+        </div>
+        <HostFootBar room={room} />
+      </div>
+    );
+  }
+
+  function HostTopBar({ room, self }) {
+    const connected = room.players.filter(p => p.connected).length;
+    return (
+      <div className="host-topbar">
+        <div className="brand">
+          <div className="brand-mark"></div>
+          <div>
+            <div className="brand-name">QUANTUM<span className="accent">QUIZ</span></div>
+            <div className="brand-tag">HOST DISPLAY · BIG SCREEN</div>
           </div>
+        </div>
+        <div className="topbar-status">
+          <div className="status-pill">
+            <span className="status-dot"></span>
+            <span>LIVE</span>
+          </div>
+          <div className="status-pill">
+            <span>ROOM</span>
+            <span style={{ color: 'var(--magenta)', fontWeight: 700, marginLeft: 6 }}>{room.code}</span>
+          </div>
+          <div className="status-pill"><span>{connected}/12</span></div>
+          <button className="status-pill btn-ghostpill" onClick={() => {
+            if (confirm('Leave room? The game will end if you are the only host.')) {
+              QQ.actions.leave();
+            }
+          }}>LEAVE</button>
         </div>
       </div>
     );
   }
 
-  function SceneSwitcher({ scene, state, dispatch }) {
-    switch (scene) {
-      case 'landing':       return <Landing dispatch={dispatch} />;
-      case 'host-create':   return <HostCreate dispatch={dispatch} state={state} />;
-      case 'player-join':   return <Lobby state={state} dispatch={dispatch} compact />;
-      case 'lobby':         return <Lobby state={state} dispatch={dispatch} />;
-      case 'trivia-question':   return <TriviaQuestion state={state} dispatch={dispatch} />;
-      case 'trivia-reveal':     return <TriviaReveal state={state} dispatch={dispatch} />;
-      case 'trivia-leaderboard':return <TriviaLeaderboard state={state} dispatch={dispatch} />;
-      case 'trivia-podium':     return <TriviaPodium state={state} dispatch={dispatch} />;
-      case 'impostor-reveal':   return <ImpostorReveal state={state} dispatch={dispatch} />;
-      case 'impostor-clues':    return <ImpostorClues state={state} dispatch={dispatch} />;
-      case 'impostor-vote':     return <ImpostorVote state={state} dispatch={dispatch} />;
-      case 'impostor-result':   return <ImpostorResult state={state} dispatch={dispatch} />;
-      default: return null;
+  function HostFootBar({ room }) {
+    const connected = room.players.filter(p => p.connected).length;
+    return (
+      <div className="host-footbar mono">
+        <span className="tv-foot-dot"></span>
+        <span>QUANTUMQUIZ // HOST v1.0</span>
+        <span style={{ marginLeft: 'auto' }}>ROOM · {room.code}</span>
+        <span>{connected}/12 PLAYERS</span>
+      </div>
+    );
+  }
+
+  function HostSwitch({ room, self, joinUrl }) {
+    switch (room.state) {
+      case 'lobby':                return <Lobby room={room} self={self} joinUrl={joinUrl} />;
+      case 'trivia-question':      return <TriviaQuestion room={room} self={self} />;
+      case 'trivia-reveal':        return <TriviaReveal room={room} self={self} />;
+      case 'trivia-leaderboard':   return <TriviaLeaderboard room={room} />;
+      case 'trivia-podium':        return <TriviaPodium room={room} />;
+      case 'impostor-reveal':      return <ImpostorReveal room={room} />;
+      case 'impostor-clues':       return <ImpostorClues room={room} />;
+      case 'impostor-vote':        return <ImpostorVote room={room} />;
+      case 'impostor-bonus':       return <ImpostorBonus room={room} />;
+      case 'impostor-result':      return <ImpostorResult room={room} />;
+      default:                     return <div className="mono ink-dim">unknown state: {room.state}</div>;
     }
   }
 
-  // =====================
-  // 1. LANDING
-  // =====================
-  function Landing({ dispatch }) {
+  // ─── Lobby ─────────────────────────────────────────────────────────────────
+  function Lobby({ room, self, joinUrl }) {
+    const connected = room.players.filter(p => p.connected);
+    const canStart = connected.length >= (room.settings.mode === 'impostor' ? 3 : 2);
+    const [showSettings, setShowSettings] = useState(false);
     return (
-      <div style={{ display: 'flex', flexDirection: 'column', height: '100%', justifyContent: 'space-between' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-          <div className="mono" style={{ fontSize: 11, color: 'var(--ink-mute)', letterSpacing: '0.2em' }}>
-            ▸ INSERT_COIN · PRESS_START · MULTIPLAYER_READY
-          </div>
-          <div className="mono" style={{ fontSize: 11, color: 'var(--cyan)', letterSpacing: '0.2em' }}>
-            SYS.v1.0 · ONLINE
-          </div>
-        </div>
-
-        <div style={{ textAlign: 'center' }}>
-          <div className="eyebrow" style={{ color: 'var(--cyan)', textShadow: 'var(--glow-c)', marginBottom: 24 }}>
-            ◆ A REAL-TIME PARTY GAME ◆
-          </div>
-          <h1 className="h-display flicker" style={{
-            fontSize: 144,
-            margin: 0,
-            background: 'linear-gradient(180deg, #fff 0%, #ff2e88 100%)',
-            WebkitBackgroundClip: 'text',
-            WebkitTextFillColor: 'transparent',
-            textShadow: '0 0 40px rgba(255,46,136,0.3)',
-            letterSpacing: '-0.05em',
-          }}>
-            QUANTUM<br/>
-            <span style={{
-              background: 'linear-gradient(180deg, #00e6ff 0%, #9d5cff 100%)',
-              WebkitBackgroundClip: 'text',
-              WebkitTextFillColor: 'transparent',
-            }}>QUIZ</span>
-          </h1>
-          <div className="mono" style={{ fontSize: 14, color: 'var(--ink-dim)', letterSpacing: '0.3em', marginTop: 20 }}>
-            TRIVIA × SOCIAL DEDUCTION × CHAOS
-          </div>
-        </div>
-
-        <div style={{ display: 'flex', gap: 16, justifyContent: 'center', alignItems: 'center' }}>
-          <button className="btn btn-primary" onClick={() => dispatch({ type: 'goto', scene: 'host-create' })}>
-            ▶ HOST A GAME
-          </button>
-          <button className="btn btn-cyan" onClick={() => dispatch({ type: 'goto', scene: 'player-join' })}>
-            JOIN A GAME
-          </button>
-          <button className="btn btn-ghost">HOW TO PLAY</button>
-        </div>
-
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end' }}>
-          <div className="mono" style={{ fontSize: 10, color: 'var(--ink-mute)', letterSpacing: '0.2em' }}>
-            © 2026 QQ.GAMES · OPEN_SOURCE · MIT
-          </div>
-          <Soundwave color="#00e6ff" bars={20} />
-        </div>
-      </div>
-    );
-  }
-
-  // =====================
-  // 2. HOST CREATE LOBBY
-  // =====================
-  function HostCreate({ dispatch, state }) {
-    const [mode, setMode] = React.useState('trivia');
-    const [rounds, setRounds] = React.useState(12);
-    const [time, setTime] = React.useState(20);
-
-    return (
-      <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 24 }}>
+      <div className="scene-full">
+        <div className="scene-head">
           <div>
-            <div className="eyebrow" style={{ marginBottom: 8 }}>STEP 01 / 02 · CONFIGURE</div>
-            <h2 className="h-display" style={{ fontSize: 48, margin: 0 }}>New lobby</h2>
+            <div className="eyebrow">LOBBY · WAITING FOR PLAYERS</div>
+            <h2 className="h-display lobby-title">Tap in. Pick a name.</h2>
           </div>
-          <button className="btn btn-ghost btn-sm" onClick={() => dispatch({ type: 'goto', scene: 'landing' })}>← BACK</button>
-        </div>
-
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 28, flex: 1, minHeight: 0 }}>
-          <div>
-            <div className="eyebrow" style={{ marginBottom: 14 }}>① GAME MODE</div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-              {[
-                { id: 'trivia', name: 'TRIVIA', tag: 'Fast-paced quiz · 500+ questions', color: 'magenta' },
-                { id: 'impostor', name: 'IMPOSTOR', tag: 'Social deduction · word bluffing', color: 'cyan' },
-                { id: 'mixed', name: 'MIXED', tag: '3 trivia rounds → 1 impostor round → repeat', color: 'lime' },
-              ].map(m => (
-                <button key={m.id}
-                  onClick={() => setMode(m.id)}
-                  style={{
-                    display: 'flex', alignItems: 'center', gap: 16,
-                    padding: 16, textAlign: 'left',
-                    background: mode === m.id ? 'var(--panel-2)' : 'var(--panel)',
-                    border: `2px solid ${mode === m.id ? `var(--${m.color})` : 'var(--line)'}`,
-                    boxShadow: mode === m.id ? `var(--glow-${m.color[0]})` : 'none',
-                    cursor: 'pointer',
-                  }}>
-                  <div style={{ width: 36, height: 36, background: `var(--${m.color})`, boxShadow: mode === m.id ? `var(--glow-${m.color[0]})` : 'none' }}></div>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontWeight: 700, fontSize: 18, letterSpacing: '-0.01em' }}>{m.name}</div>
-                    <div className="mono" style={{ fontSize: 11, color: 'var(--ink-mute)', marginTop: 2 }}>{m.tag}</div>
-                  </div>
-                  <div className="mono" style={{ fontSize: 10, color: mode === m.id ? `var(--${m.color})` : 'var(--ink-mute)' }}>
-                    {mode === m.id ? '◉ ACTIVE' : '○ SELECT'}
-                  </div>
-                </button>
-              ))}
-            </div>
-
-            <div className="eyebrow" style={{ margin: '24px 0 14px' }}>② CATEGORIES</div>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-              {['General', 'Science', 'History', 'Geography', 'Film/TV', 'Music', 'Sports', 'Games', 'Lit', 'Tech', 'Food'].map((c, i) => (
-                <span key={c} className="mono" style={{
-                  padding: '6px 12px',
-                  fontSize: 11,
-                  background: i === 8 || i === 6 ? 'transparent' : 'var(--panel-2)',
-                  border: `1px solid ${i === 8 || i === 6 ? 'var(--line)' : 'var(--cyan)'}`,
-                  color: i === 8 || i === 6 ? 'var(--ink-mute)' : 'var(--cyan)',
-                  letterSpacing: '0.1em',
-                  textTransform: 'uppercase',
-                }}>{c}{(!(i === 8 || i === 6)) && ' ✓'}</span>
-              ))}
-            </div>
-          </div>
-
-          <div>
-            <div className="eyebrow" style={{ marginBottom: 14 }}>③ TIMING & ROUNDS</div>
-            <div style={{ display: 'flex', gap: 12, marginBottom: 24 }}>
-              <Stat label="ROUNDS" value={rounds} unit="" color="magenta" />
-              <Stat label="TIME/QUESTION" value={time} unit="s" color="cyan" />
-              <Stat label="MAX PLAYERS" value="12" unit="" color="lime" />
-            </div>
-
-            <div className="eyebrow" style={{ marginBottom: 14 }}>④ DIFFICULTY MIX</div>
-            <div style={{ display: 'flex', gap: 8, marginBottom: 24 }}>
-              <DiffPill label="EASY" pct={30} color="lime" />
-              <DiffPill label="MEDIUM" pct={50} color="cyan" active />
-              <DiffPill label="HARD" pct={20} color="magenta" />
-            </div>
-
-            <div className="eyebrow" style={{ marginBottom: 14 }}>⑤ EXTRAS</div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              <Toggle label="STREAK BONUSES" on />
-              <Toggle label="TYPE-THE-ANSWER ON HARD" on />
-              <Toggle label="HOST MUSIC" on />
-              <Toggle label="ALLOW LATE JOIN" />
-            </div>
+          <div className="row gap">
+            <button className="btn btn-ghost btn-sm" onClick={() => setShowSettings(s => !s)}>⚙ SETTINGS</button>
+            <button className="btn btn-primary btn-sm" disabled={!canStart}
+              onClick={() => QQ.actions.startGame()}>▶ START GAME</button>
           </div>
         </div>
 
-        <div style={{ marginTop: 20, display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: 20, borderTop: '1px solid var(--line)' }}>
-          <div className="mono" style={{ fontSize: 11, color: 'var(--ink-mute)', letterSpacing: '0.18em' }}>
-            ROOM CODE WILL BE GENERATED ON CREATE
-          </div>
-          <button className="btn btn-primary" onClick={() => dispatch({ type: 'goto', scene: 'lobby' })}>
-            CREATE LOBBY →
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  function Stat({ label, value, unit, color }) {
-    return (
-      <div style={{ flex: 1, padding: '14px 16px', background: 'var(--panel-2)', border: '1px solid var(--line)' }}>
-        <div className="mono" style={{ fontSize: 10, color: 'var(--ink-mute)', letterSpacing: '0.18em' }}>{label}</div>
-        <div className="bignum" style={{ fontSize: 36, color: `var(--${color})`, textShadow: `var(--glow-${color[0]})`, marginTop: 4 }}>
-          {value}<span style={{ fontSize: 18, color: 'var(--ink-mute)' }}>{unit}</span>
-        </div>
-      </div>
-    );
-  }
-
-  function DiffPill({ label, pct, color, active }) {
-    return (
-      <div style={{
-        flex: pct / 10,
-        padding: '10px 14px',
-        background: active ? `linear-gradient(90deg, var(--${color}) 0%, transparent 200%)` : 'var(--panel-2)',
-        border: `1px solid ${active ? `var(--${color})` : 'var(--line)'}`,
-      }}>
-        <div className="mono" style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.15em', color: active ? '#0a0814' : 'var(--ink-dim)' }}>{label}</div>
-        <div className="mono" style={{ fontSize: 13, fontWeight: 700, color: active ? '#0a0814' : 'var(--ink)', marginTop: 2 }}>{pct}%</div>
-      </div>
-    );
-  }
-
-  function Toggle({ label, on }) {
-    return (
-      <div style={{
-        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-        padding: '10px 14px',
-        background: 'var(--panel-2)',
-        border: '1px solid var(--line)',
-      }}>
-        <span className="mono" style={{ fontSize: 12, letterSpacing: '0.08em' }}>{label}</span>
-        <div style={{
-          width: 36, height: 18,
-          background: on ? 'var(--lime)' : 'var(--panel-3)',
-          boxShadow: on ? 'var(--glow-l)' : 'none',
-          position: 'relative',
-        }}>
-          <div style={{
-            position: 'absolute', top: 2, left: on ? 20 : 2,
-            width: 14, height: 14, background: on ? '#0a1400' : 'var(--ink-mute)',
-            transition: 'left 0.15s',
-          }}></div>
-        </div>
-      </div>
-    );
-  }
-
-  // =====================
-  // 3-4. LOBBY (also used for player-join with `compact`)
-  // =====================
-  function Lobby({ state, dispatch, compact }) {
-    const connected = state.players.filter(p => p.connected);
-    return (
-      <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 18 }}>
-          <div>
-            <div className="eyebrow" style={{ marginBottom: 8 }}>LOBBY · WAITING FOR PLAYERS</div>
-            <h2 className="h-display" style={{ fontSize: 38, margin: 0, whiteSpace: 'nowrap' }}>Tap in. Pick a name.</h2>
-          </div>
-          <div style={{ display: 'flex', gap: 12 }}>
-            <button className="btn btn-ghost btn-sm">⚙ SETTINGS</button>
-            <button className="btn btn-primary btn-sm" disabled={connected.length < 2}
-              onClick={() => dispatch({ type: 'goto', scene: 'trivia-question' })}>
-              ▶ START GAME
-            </button>
-          </div>
-        </div>
-
-        <div style={{ display: 'grid', gridTemplateColumns: '300px 1fr 1fr', gap: 24, flex: 1, minHeight: 0 }}>
-          {/* QR + Code */}
-          <div className="bracket m" style={{ padding: 24, background: 'var(--panel)', border: '1px solid var(--magenta)', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16 }}>
-            <div className="mono" style={{ fontSize: 10, color: 'var(--magenta)', letterSpacing: '0.22em' }}>SCAN OR ENTER</div>
-            <QR seed={state.roomCode} size={200} />
-            <div style={{ textAlign: 'center' }}>
-              <div className="mono" style={{ fontSize: 10, color: 'var(--ink-mute)', letterSpacing: '0.18em' }}>ROOM CODE</div>
-              <div className="bignum" style={{ fontSize: 44, color: 'var(--magenta)', textShadow: 'var(--glow-m)', letterSpacing: '0.04em', marginTop: 2 }}>
-                {state.roomCode}
-              </div>
+        <div className="lobby-grid">
+          <div className="bracket m lobby-join">
+            <div className="mono magenta-lbl">SCAN OR ENTER</div>
+            <QR text={joinUrl} size={220} />
+            <div className="lobby-code">
+              <div className="mono ink-mute label-min">ROOM CODE</div>
+              <div className="bignum lobby-code-text">{room.code}</div>
             </div>
-            <div className="mono" style={{ fontSize: 9, color: 'var(--ink-mute)', textAlign: 'center', letterSpacing: '0.18em' }}>
-              QQ.GAMES/J · 60s RECONNECT
-            </div>
+            <div className="mono ink-mute join-url">{joinUrl.replace(/^https?:\/\//, '')}</div>
           </div>
 
-          {/* Player grid */}
-          <div style={{ display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+          <div className="lobby-players">
+            <div className="row spread">
               <div className="eyebrow">CONNECTED · {connected.length}/12</div>
-              <div className="mono" style={{ fontSize: 11, color: 'var(--lime)' }}>● LIVE</div>
+              <div className="mono lime">● LIVE</div>
             </div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, alignContent: 'start' }}>
-              {state.players.map(p => (
-                <div key={p.id} className="player-chip" style={{
-                  opacity: p.connected ? 1 : 0.35,
-                  borderColor: p.isHost ? 'var(--magenta)' : 'var(--line)',
-                }}>
-                  <Avatar name={p.name} hue={p.hue} size="md" />
-                  <div style={{ flex: 1 }}>
-                    <div className="nm">{p.name}{p.isHost && <span className="mono" style={{ marginLeft: 8, fontSize: 10, color: 'var(--magenta)' }}>HOST</span>}</div>
-                    <div className="mono" style={{ fontSize: 10, color: 'var(--ink-mute)', letterSpacing: '0.12em' }}>
-                      {p.connected ? 'READY' : 'WAITING···'}
-                    </div>
-                  </div>
-                  <div style={{ width: 8, height: 8, background: p.connected ? 'var(--lime)' : 'var(--ink-mute)', boxShadow: p.connected ? 'var(--glow-l)' : 'none' }}></div>
-                </div>
+            <div className="player-grid">
+              {room.players.map(p => (
+                <PlayerChip key={p.id} player={p} self={self} canKick={self?.role === 'host' && p.id !== self.playerId} />
               ))}
-              {/* Empty slots */}
-              {Array.from({ length: Math.max(0, 8 - state.players.length) }).slice(0, 4).map((_, i) => (
-                <div key={`e${i}`} className="player-chip" style={{ borderStyle: 'dashed', opacity: 0.4 }}>
-                  <div style={{ width: 44, height: 44, border: '1px dashed var(--ink-mute)' }}></div>
-                  <div className="mono" style={{ fontSize: 10, color: 'var(--ink-mute)', letterSpacing: '0.2em' }}>SLOT {state.players.length + i + 1}</div>
+              {Array.from({ length: Math.max(0, 8 - room.players.length) }).slice(0, 4).map((_, i) => (
+                <div key={`e${i}`} className="player-chip empty">
+                  <div className="empty-av"></div>
+                  <div className="mono ink-mute">SLOT {room.players.length + i + 1}</div>
                 </div>
               ))}
             </div>
+            {showSettings && <SettingsPanel settings={room.settings} />}
           </div>
 
-          {/* Chat */}
-          <div style={{ display: 'flex', flexDirection: 'column', background: 'var(--panel)', border: '1px solid var(--line)', minHeight: 0 }}>
-            <div style={{ padding: '10px 14px', borderBottom: '1px solid var(--line)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span className="eyebrow">LOBBY CHAT</span>
-              <span className="mono" style={{ fontSize: 10, color: 'var(--ink-mute)' }}>{chat.length} MSGS</span>
-            </div>
-            <div style={{ flex: 1, padding: '10px 14px', display: 'flex', flexDirection: 'column', gap: 4, overflow: 'hidden' }}>
-              {chat.map((m, i) => (
-                <div key={i} className={`chat-msg ${m.kind === 'system' ? 'system' : ''}`}>
-                  {m.kind === 'system' ? (
-                    <div className="what">— {m.what} —</div>
-                  ) : (
-                    <>
-                      <Avatar name={m.who} hue={m.hue} size="sm" />
-                      <div style={{ flex: 1 }}>
-                        <div className="who" style={{ color: `oklch(0.75 0.2 ${m.hue})` }}>{m.who}</div>
-                        <div className="what">{m.what}</div>
-                      </div>
-                    </>
-                  )}
-                </div>
-              ))}
-            </div>
-            <div style={{ padding: 10, borderTop: '1px solid var(--line)', display: 'flex', gap: 8 }}>
-              <input className="mono" placeholder="say something..." style={{
-                flex: 1, background: 'var(--panel-2)', border: '1px solid var(--line)', color: 'var(--ink)',
-                padding: '8px 12px', fontSize: 12, letterSpacing: '0.04em'
-              }} />
-              <button className="btn btn-cyan btn-sm">SEND</button>
-            </div>
-          </div>
+          <LobbyChat room={room} self={self} />
         </div>
       </div>
     );
   }
 
-  // =====================
-  // 5. TRIVIA QUESTION
-  // =====================
-  function TriviaQuestion({ state, dispatch }) {
+  function PlayerChip({ player, self, canKick }) {
     return (
-      <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-        {/* Header bar */}
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 24 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-            <span className="mono" style={{
-              padding: '6px 12px', fontSize: 11, fontWeight: 700,
-              background: 'var(--cyan)', color: '#001820', letterSpacing: '0.15em'
-            }}>{question.category}</span>
-            <span className="mono" style={{ fontSize: 11, color: 'var(--ink-dim)', letterSpacing: '0.15em' }}>
-              ◆ {question.difficulty}
-            </span>
-            <span className="mono" style={{ fontSize: 11, color: 'var(--ink-mute)', letterSpacing: '0.15em' }}>
-              QUESTION {state.questionNum}/12
-            </span>
+      <div className="player-chip" style={{
+        opacity: player.connected ? 1 : 0.35,
+        borderColor: player.isHost ? 'var(--magenta)' : 'var(--line)',
+      }}>
+        <Avatar name={player.name} hue={player.hue} shape={player.shape} size="md" />
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div className="nm">
+            {player.name}
+            {player.isHost && <span className="badge-host mono">HOST</span>}
+            {self?.playerId === player.id && <span className="badge-you mono">YOU</span>}
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-            <TimerRing seconds={state.timer} total={20} size={84} color={state.timer < 6 ? 'magenta' : 'cyan'} />
-          </div>
+          <div className="mono ink-mute small">{player.connected ? 'READY' : 'WAITING…'}</div>
         </div>
+        {canKick
+          ? <button className="kick-btn mono" onClick={() => {
+              if (confirm(`Kick ${player.name}?`)) QQ.actions.kickPlayer(player.id);
+            }}>✕</button>
+          : <div className={`status-led ${player.connected ? 'on' : ''}`}></div>}
+      </div>
+    );
+  }
 
-        {/* Question */}
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 24, minHeight: 0 }}>
-          <h2 className="h-display" style={{
-            fontSize: 44, margin: 0, textAlign: 'center', lineHeight: 1.1,
-            textWrap: 'pretty', maxWidth: 880, alignSelf: 'center'
-          }}>
-            {question.text}
-          </h2>
+  function SettingsPanel({ settings }) {
+    return (
+      <div className="settings-panel">
+        <div className="eyebrow" style={{ marginBottom: 10 }}>GAME SETTINGS</div>
+        <SettingRow label="MODE">
+          {['trivia', 'impostor'].map(m => (
+            <button key={m} className={`chip ${settings.mode === m ? 'active' : ''}`}
+              onClick={() => QQ.actions.updateSettings({ mode: m })}>{m.toUpperCase()}</button>
+          ))}
+        </SettingRow>
+        {settings.mode === 'trivia' && (
+          <>
+            <SettingRow label="ROUNDS">
+              {[5, 10, 15, 20].map(n => (
+                <button key={n} className={`chip ${settings.rounds === n ? 'active' : ''}`}
+                  onClick={() => QQ.actions.updateSettings({ rounds: n })}>{n}</button>
+              ))}
+            </SettingRow>
+            <SettingRow label="TIME">
+              {[10, 15, 20, 30].map(n => (
+                <button key={n} className={`chip ${settings.timePerQuestion === n ? 'active' : ''}`}
+                  onClick={() => QQ.actions.updateSettings({ timePerQuestion: n })}>{n}s</button>
+              ))}
+            </SettingRow>
+            <SettingRow label="DIFFICULTY">
+              {['easy', 'medium', 'hard', 'mixed'].map(d => (
+                <button key={d} className={`chip ${settings.difficulty === d ? 'active' : ''}`}
+                  onClick={() => QQ.actions.updateSettings({ difficulty: d })}>{d.toUpperCase()}</button>
+              ))}
+            </SettingRow>
+          </>
+        )}
+        {settings.mode === 'impostor' && (
+          <SettingRow label="CLUES PER PLAYER">
+            {[1, 2, 3].map(n => (
+              <button key={n} className={`chip ${settings.cluesPerPlayer === n ? 'active' : ''}`}
+                onClick={() => QQ.actions.updateSettings({ cluesPerPlayer: n })}>{n}</button>
+            ))}
+          </SettingRow>
+        )}
+      </div>
+    );
+  }
 
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, maxWidth: 880, alignSelf: 'center', width: '100%' }}>
-            {question.options.map((opt, i) => (
+  function SettingRow({ label, children }) {
+    return (
+      <div className="setting-row">
+        <span className="mono ink-mute">{label}</span>
+        <div className="row gap-sm">{children}</div>
+      </div>
+    );
+  }
+
+  function LobbyChat({ room, self }) {
+    const [text, setText] = useState('');
+    const ref = React.useRef(null);
+    useEffect(() => { if (ref.current) ref.current.scrollTop = ref.current.scrollHeight; }, [room.chat.length]);
+    function send(e) {
+      e.preventDefault();
+      const t = text.trim();
+      if (!t) return;
+      QQ.actions.chat(t);
+      setText('');
+    }
+    return (
+      <div className="lobby-chat">
+        <div className="row spread chat-head">
+          <span className="eyebrow">LOBBY CHAT</span>
+          <span className="mono ink-mute">{room.chat.length} MSGS</span>
+        </div>
+        <div className="chat-stream" ref={ref}>
+          {room.chat.map((m, i) => (
+            <div key={i} className={`chat-msg ${m.kind === 'system' ? 'system' : ''}`}>
+              {m.kind === 'system'
+                ? <div className="what">— {m.text} —</div>
+                : <>
+                  <Avatar name={m.from} hue={m.hue ?? 200} size="sm" />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div className="who" style={{ color: m.hue ? `oklch(0.75 0.2 ${m.hue})` : 'var(--ink-dim)' }}>{m.from}</div>
+                    <div className="what">{m.text}</div>
+                  </div>
+                </>}
+            </div>
+          ))}
+        </div>
+        <form className="chat-input-row" onSubmit={send}>
+          <input className="mono chat-input" placeholder="say something…"
+            value={text} onChange={e => setText(e.target.value)} maxLength={200} />
+          <button type="submit" className="btn btn-cyan btn-sm">SEND</button>
+        </form>
+      </div>
+    );
+  }
+
+  // ─── Trivia ────────────────────────────────────────────────────────────────
+  function TriviaQuestion({ room }) {
+    const seconds = useCountdown(room.phaseEndsAt) || 0;
+    const total = room.settings.timePerQuestion;
+    const q = room.trivia?.question;
+    if (!q) return null;
+    const answered = room.trivia.answeredCount;
+    const totalPlayers = room.players.filter(p => p.connected).length;
+    return (
+      <div className="scene-full">
+        <div className="scene-head">
+          <div className="row gap">
+            <span className="cat-pill mono">{q.category.toUpperCase()}</span>
+            <span className="mono ink-dim">◆ {q.difficulty.toUpperCase()}</span>
+            <span className="mono ink-mute">QUESTION {room.trivia.questionNum}/{room.trivia.totalQuestions}</span>
+          </div>
+          <TimerRing seconds={seconds} total={total} size={92} color={seconds < 6 ? 'magenta' : 'cyan'} />
+        </div>
+        <div className="trivia-question-body">
+          <h2 className="h-display trivia-q-text">{q.text}</h2>
+          <div className="trivia-options">
+            {q.options.map((opt, i) => (
               <div key={i} className={`ans ${['a','b','c','d'][i]}`} style={{ pointerEvents: 'none' }}>
                 <div className="shape">{['A','B','C','D'][i]}</div>
                 <div style={{ flex: 1 }}>{opt}</div>
-                <div className="mono" style={{ fontSize: 13, color: 'var(--ink-mute)' }}>{['A','B','C','D'][i]}</div>
+                <div className="mono ink-mute">{['A','B','C','D'][i]}</div>
               </div>
             ))}
           </div>
         </div>
-
-        {/* Footer */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: 18, borderTop: '1px solid var(--line)' }}>
-          <div className="mono" style={{ fontSize: 12, color: 'var(--ink-mute)', letterSpacing: '0.15em' }}>
-            ◆ {state.players.filter(p => p.connected).length - state.answered} STILL ANSWERING · {state.answered} LOCKED IN
+        <div className="scene-foot">
+          <div className="mono ink-mute">
+            ◆ {totalPlayers - answered} STILL ANSWERING · {answered} LOCKED IN
           </div>
-          <button className="btn btn-ghost btn-sm" onClick={() => dispatch({ type: 'goto', scene: 'trivia-reveal' })}>SKIP TO REVEAL →</button>
+          <button className="btn btn-ghost btn-sm" onClick={() => QQ.actions.advancePhase()}>SKIP →</button>
         </div>
       </div>
     );
   }
 
-  // =====================
-  // 6. TRIVIA REVEAL
-  // =====================
-  function TriviaReveal({ state, dispatch }) {
-    const total = answerDistribution.reduce((a, b) => a + b, 0);
+  function TriviaReveal({ room }) {
+    const q = room.trivia?.question;
+    if (!q) return null;
+    const dist = room.trivia.distribution || [0, 0, 0, 0];
+    const total = dist.reduce((a, b) => a + b, 0);
+    const results = room.trivia.results || [];
+    const fastest = results
+      .filter(r => r.correct)
+      .sort((a, b) => b.timeRemainingMs - a.timeRemainingMs)[0];
+    const fastPlayer = fastest && room.players.find(p => p.id === fastest.playerId);
     return (
-      <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 24 }}>
-          <span className="mono" style={{ padding: '6px 12px', fontSize: 11, fontWeight: 700, background: 'var(--cyan)', color: '#001820', letterSpacing: '0.15em' }}>{question.category}</span>
-          <div className="eyebrow" style={{ color: 'var(--lime)', textShadow: 'var(--glow-l)' }}>◆ ANSWER REVEAL</div>
-          <span className="mono" style={{ fontSize: 11, color: 'var(--ink-mute)' }}>QUESTION {state.questionNum}/12</span>
+      <div className="scene-full">
+        <div className="scene-head">
+          <span className="cat-pill mono">{q.category.toUpperCase()}</span>
+          <div className="eyebrow lime-glow">◆ ANSWER REVEAL</div>
+          <span className="mono ink-mute">Q {room.trivia.questionNum}/{room.trivia.totalQuestions}</span>
         </div>
-
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 24 }}>
-          <div style={{ textAlign: 'center' }}>
-            <div className="eyebrow" style={{ marginBottom: 12 }}>CORRECT ANSWER</div>
-            <h2 className="h-display" style={{ fontSize: 72, margin: 0, color: 'var(--lime)', textShadow: 'var(--glow-l)' }}>
-              {question.options[question.correct]}
-            </h2>
-            <div className="mono" style={{ fontSize: 12, color: 'var(--ink-mute)', letterSpacing: '0.18em', marginTop: 12 }}>
-              ✓ {question.source}
-            </div>
+        <div className="reveal-body">
+          <div className="reveal-correct">
+            <div className="eyebrow">CORRECT ANSWER</div>
+            <h2 className="h-display reveal-text">{q.options[q.correct]}</h2>
           </div>
-
-          <div style={{ maxWidth: 900, alignSelf: 'center', width: '100%', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
-            {question.options.map((opt, i) => {
-              const correct = i === question.correct;
+          <div className="reveal-options">
+            {q.options.map((opt, i) => {
+              const correct = i === q.correct;
               return (
-                <div key={i} className={`ans ${['a','b','c','d'][i]} ${correct ? 'correct' : answerDistribution[i] > 0 ? 'wrong' : ''}`}>
+                <div key={i} className={`ans ${['a','b','c','d'][i]} ${correct ? 'correct' : dist[i] > 0 ? 'wrong' : ''}`}>
                   <div className="shape">{['A','B','C','D'][i]}</div>
                   <div style={{ flex: 1 }}>{opt}</div>
-                  <div className="mono" style={{ fontSize: 14, fontWeight: 700, color: correct ? 'var(--lime)' : 'var(--ink-mute)' }}>
-                    {answerDistribution[i]}/{total}
+                  <div className="mono" style={{ fontWeight: 700, color: correct ? 'var(--lime)' : 'var(--ink-mute)' }}>
+                    {dist[i]}/{total}
                   </div>
                 </div>
               );
             })}
           </div>
-
-          <div style={{ maxWidth: 900, alignSelf: 'center', width: '100%' }}>
-            <div className="eyebrow" style={{ marginBottom: 8 }}>FASTEST CORRECT</div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: 14, background: 'var(--panel-2)', border: '1px solid var(--lime)', boxShadow: 'var(--glow-l)' }}>
-              <Avatar name="BLAZE" hue={340} size="md" />
-              <div style={{ flex: 1 }}>
-                <div style={{ fontWeight: 700, fontSize: 18 }}>BLAZE</div>
-                <div className="mono" style={{ fontSize: 11, color: 'var(--ink-mute)' }}>locked at 2.3s · +940 pts · 🔥 4 STREAK</div>
+          {fastPlayer && (
+            <div className="reveal-fastest">
+              <div className="eyebrow">FASTEST CORRECT</div>
+              <div className="fastest-row">
+                <Avatar name={fastPlayer.name} hue={fastPlayer.hue} size="md" />
+                <div style={{ flex: 1 }}>
+                  <div className="nm">{fastPlayer.name}</div>
+                  <div className="mono ink-mute">locked at {((room.settings.timePerQuestion * 1000 - fastest.timeRemainingMs) / 1000).toFixed(1)}s · +{fastest.points} pts</div>
+                </div>
+                <div className="bignum lime">+{fastest.points}</div>
               </div>
-              <div className="bignum" style={{ fontSize: 32, color: 'var(--lime)', textShadow: 'var(--glow-l)' }}>+940</div>
             </div>
-          </div>
+          )}
         </div>
-
-        <div style={{ display: 'flex', justifyContent: 'flex-end', paddingTop: 18 }}>
-          <button className="btn btn-cyan btn-sm" onClick={() => dispatch({ type: 'goto', scene: 'trivia-leaderboard' })}>LEADERBOARD →</button>
+        <div className="scene-foot end">
+          <button className="btn btn-cyan btn-sm" onClick={() => QQ.actions.advancePhase()}>LEADERBOARD →</button>
         </div>
       </div>
     );
   }
 
-  // =====================
-  // 7. TRIVIA LEADERBOARD
-  // =====================
-  function TriviaLeaderboard({ state, dispatch }) {
-    const sorted = [...state.players].filter(p => p.connected).sort((a, b) => b.score - a.score);
+  function TriviaLeaderboard({ room }) {
+    const seconds = useCountdown(room.phaseEndsAt);
+    const sorted = [...room.players].filter(p => p.connected).sort((a, b) => b.score - a.score);
     const max = sorted[0]?.score || 1;
     return (
-      <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 18 }}>
+      <div className="scene-full">
+        <div className="scene-head">
           <div>
-            <div className="eyebrow">AFTER QUESTION {state.questionNum} / 12</div>
-            <h2 className="h-display" style={{ fontSize: 44, margin: '6px 0 0' }}>Leaderboard</h2>
+            <div className="eyebrow">AFTER Q {room.trivia.questionNum} / {room.trivia.totalQuestions}</div>
+            <h2 className="h-display" style={{ fontSize: 'clamp(28px, 4vw, 44px)', margin: '6px 0 0' }}>Leaderboard</h2>
           </div>
-          <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-            <span className="mono" style={{ fontSize: 11, color: 'var(--ink-mute)', letterSpacing: '0.15em' }}>NEXT IN</span>
-            <span className="bignum" style={{ fontSize: 32, color: 'var(--cyan)', textShadow: 'var(--glow-c)' }}>05</span>
-          </div>
+          {seconds != null && (
+            <div className="row gap">
+              <span className="mono ink-mute">NEXT IN</span>
+              <span className="bignum cyan-glow" style={{ fontSize: 32 }}>{String(seconds).padStart(2, '0')}</span>
+            </div>
+          )}
         </div>
-
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 10, overflow: 'hidden' }}>
+        <div className="leaderboard">
           {sorted.map((p, i) => {
             const w = (p.score / max) * 100;
             const rankCls = i === 0 ? 'gold' : i === 1 ? 'silver' : i === 2 ? 'bronze' : '';
+            const lastAnswer = room.trivia.results?.find(r => r.playerId === p.id);
             return (
-              <div key={p.id} className={`lb-row ${rankCls}`} style={{ background: i === 0 ? 'linear-gradient(90deg, rgba(255,176,32,0.12), transparent)' : undefined }}>
+              <div key={p.id} className={`lb-row ${rankCls}`}>
                 <span className="rank">#{i + 1}</span>
-                <Avatar name={p.name} hue={p.hue} size="md" />
+                <Avatar name={p.name} hue={p.hue} shape={p.shape} size="md" />
                 <div>
-                  <div style={{ fontWeight: 700, fontSize: 17, letterSpacing: '0.02em' }}>
+                  <div className="nm">
                     {p.name}
-                    {p.streak >= 3 && <span className="mono" style={{ marginLeft: 10, fontSize: 11, color: 'var(--amber)' }}>🔥 {p.streak} STREAK</span>}
+                    {p.streak >= 3 && <span className="mono amber" style={{ marginLeft: 10, fontSize: 11 }}>🔥 {p.streak} STREAK</span>}
                   </div>
-                  <div style={{ marginTop: 6, height: 6, background: 'var(--panel-3)', position: 'relative' }}>
-                    <div style={{
-                      width: `${w}%`, height: '100%',
-                      background: i === 0 ? 'var(--amber)' : i === 1 ? '#c0c0d8' : i === 2 ? '#c97c4e' : 'var(--cyan)',
-                      boxShadow: `0 0 8px ${i === 0 ? 'rgba(255,176,32,0.6)' : 'rgba(0,230,255,0.4)'}`,
-                      transition: 'width 0.8s'
-                    }}></div>
-                  </div>
+                  <div className="lb-bar"><div className="lb-bar-fill" style={{ width: `${w}%`, background: rankColor(i) }}></div></div>
                 </div>
                 <span className="score">
                   {p.score.toLocaleString()}
-                  <span className="delta">+{(Math.floor(Math.random() * 600) + 200)}</span>
+                  {lastAnswer?.points > 0 && <span className="delta">+{lastAnswer.points}</span>}
                 </span>
               </div>
             );
           })}
         </div>
-
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: 16, marginTop: 12, borderTop: '1px solid var(--line)' }}>
-          <div className="mono" style={{ fontSize: 11, color: 'var(--ink-mute)', letterSpacing: '0.15em' }}>
-            ◆ NEXT CATEGORY · ENTERTAINMENT
-          </div>
-          <div style={{ display: 'flex', gap: 10 }}>
-            <button className="btn btn-ghost btn-sm" onClick={() => dispatch({ type: 'goto', scene: 'trivia-podium' })}>SKIP TO PODIUM</button>
-            <button className="btn btn-cyan btn-sm" onClick={() => dispatch({ type: 'goto', scene: 'trivia-question' })}>NEXT QUESTION →</button>
-          </div>
+        <div className="scene-foot end">
+          <button className="btn btn-cyan btn-sm" onClick={() => QQ.actions.advancePhase()}>NEXT →</button>
         </div>
       </div>
     );
   }
 
-  // =====================
-  // 8. TRIVIA PODIUM
-  // =====================
-  function TriviaPodium({ state, dispatch }) {
-    const sorted = [...state.players].filter(p => p.connected).sort((a, b) => b.score - a.score);
-    const top3 = sorted.slice(0, 3);
-    const order = [1, 0, 2]; // silver, gold, bronze visual order
-    const heights = { 0: 240, 1: 180, 2: 130 };
-    return (
-      <div style={{ display: 'flex', flexDirection: 'column', height: '100%', position: 'relative' }}>
-        <Confetti />
-        <div style={{ textAlign: 'center', marginBottom: 24 }}>
-          <div className="eyebrow flicker" style={{ color: 'var(--amber)', textShadow: '0 0 12px rgba(255,176,32,0.5)' }}>
-            ◆ GAME OVER · CHAMPION ◆
-          </div>
-          <h2 className="h-display" style={{ fontSize: 52, margin: '6px 0 0',
-            background: 'linear-gradient(180deg, #ffd270, #ff2e88)',
-            WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent',
-            whiteSpace: 'nowrap',
-          }}>
-            {top3[0].name} WINS
-          </h2>
-        </div>
+  function rankColor(i) {
+    return i === 0 ? 'var(--amber)' : i === 1 ? '#c0c0d8' : i === 2 ? '#c97c4e' : 'var(--cyan)';
+  }
 
-        <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'flex-end', gap: 28, flex: 1, minHeight: 0, paddingBottom: 0 }}>
+  function TriviaPodium({ room }) {
+    const sorted = [...room.players].filter(p => p.connected).sort((a, b) => b.score - a.score);
+    const top3 = sorted.slice(0, 3);
+    const order = [1, 0, 2];
+    const heights = { 0: 260, 1: 200, 2: 150 };
+    return (
+      <div className="scene-full podium-scene">
+        <Confetti />
+        <div className="podium-head">
+          <div className="eyebrow flicker amber-glow">◆ GAME OVER · CHAMPION ◆</div>
+          <h2 className="h-display podium-winner">{top3[0]?.name || 'NO ONE'} WINS</h2>
+        </div>
+        <div className="podium-row">
           {order.map(idx => {
             const p = top3[idx];
             if (!p) return null;
-            const h = heights[idx];
             const color = idx === 0 ? 'var(--amber)' : idx === 1 ? '#c0c0d8' : '#c97c4e';
             return (
-              <div key={p.id} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-                <div style={{ marginBottom: -22, zIndex: 2, position: 'relative' }}>
-                  <Avatar name={p.name} hue={p.hue} size="md" />
+              <div key={p.id} className="podium-col">
+                <div className="podium-av">
+                  <Avatar name={p.name} hue={p.hue} shape={p.shape} size="lg" />
                 </div>
-                <div style={{
-                  width: 180, height: h,
+                <div className="podium-block" style={{
+                  height: heights[idx],
+                  '--podium-color': color,
                   background: `linear-gradient(180deg, ${color} 0%, ${color}22 100%)`,
-                  border: `2px solid ${color}`,
+                  borderColor: color,
                   boxShadow: `0 0 20px ${color}55, inset 0 0 30px ${color}44`,
-                  position: 'relative',
-                  display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-                  paddingTop: 18,
                 }}>
-                  <div style={{ fontWeight: 700, fontSize: 16, letterSpacing: '0.02em', color: '#fff' }}>{p.name}</div>
-                  <div className="bignum" style={{ fontSize: 22, color: '#fff', textShadow: `0 0 12px ${color}`, marginTop: 4 }}>
-                    {p.score.toLocaleString()}
-                  </div>
-                  <span className="bignum" style={{
-                    position: 'absolute', bottom: 6, fontSize: 64,
-                    color: '#06040e', opacity: 0.35, lineHeight: 1, fontWeight: 700,
-                  }}>{idx + 1}</span>
+                  <div className="podium-name">{p.name}</div>
+                  <div className="bignum podium-score">{p.score.toLocaleString()}</div>
+                  <span className="bignum podium-num">{idx + 1}</span>
                 </div>
               </div>
             );
           })}
         </div>
-
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12, padding: '16px 0 0', borderTop: '1px solid var(--line)', marginTop: 16 }}>
-          <StatTile label="FASTEST ANSWER" value="1.4s" who="PIXEL" color="cyan" />
-          <StatTile label="LONGEST STREAK" value="7×" who="BLAZE" color="magenta" />
-          <StatTile label="SCIENCE MVP" value="9/9" who="NEON" color="lime" />
-          <StatTile label="COMEBACK KING" value="+3.1k" who="GLITCH" color="purple" />
-        </div>
-
-        <div style={{ display: 'flex', gap: 12, justifyContent: 'center', marginTop: 14 }}>
-          <button className="btn btn-primary btn-sm" onClick={() => dispatch({ type: 'reset' })}>▶ PLAY AGAIN</button>
-          <button className="btn btn-ghost btn-sm" onClick={() => dispatch({ type: 'goto', scene: 'impostor-reveal' })}>SWITCH TO IMPOSTOR →</button>
+        <div className="podium-actions">
+          <button className="btn btn-primary btn-sm" onClick={() => QQ.actions.resetGame()}>▶ BACK TO LOBBY</button>
         </div>
       </div>
     );
   }
 
-  function StatTile({ label, value, who, color }) {
+  // ─── Impostor ──────────────────────────────────────────────────────────────
+  function ImpostorReveal({ room }) {
+    const seconds = useCountdown(room.phaseEndsAt) || 0;
     return (
-      <div style={{ padding: 14, background: 'var(--panel-2)', border: '1px solid var(--line)' }}>
-        <div className="mono" style={{ fontSize: 10, color: 'var(--ink-mute)', letterSpacing: '0.18em' }}>{label}</div>
-        <div className="bignum" style={{ fontSize: 28, color: `var(--${color})`, textShadow: `var(--glow-${color[0]})`, marginTop: 4 }}>{value}</div>
-        <div className="mono" style={{ fontSize: 11, color: 'var(--ink-dim)', marginTop: 4 }}>{who}</div>
-      </div>
-    );
-  }
-
-  function Confetti() {
-    const bits = React.useMemo(() => Array.from({ length: 40 }).map((_, i) => ({
-      left: Math.random() * 100,
-      top: Math.random() * 80,
-      hue: [340, 190, 80, 270, 30][Math.floor(Math.random() * 5)],
-      size: 4 + Math.random() * 8,
-      delay: Math.random() * 2,
-      dur: 1.4 + Math.random() * 1.4,
-      rot: Math.random() * 360,
-    })), []);
-    return (
-      <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', overflow: 'hidden' }}>
-        {bits.map((b, i) => (
-          <div key={i} style={{
-            position: 'absolute',
-            left: `${b.left}%`, top: `${b.top}%`,
-            width: b.size, height: b.size,
-            background: `oklch(0.7 0.2 ${b.hue})`,
-            boxShadow: `0 0 6px oklch(0.7 0.2 ${b.hue})`,
-            transform: `rotate(${b.rot}deg)`,
-            animation: `confetti-fall ${b.dur}s ${b.delay}s infinite ease-in`
-          }}></div>
-        ))}
-        <style>{`@keyframes confetti-fall {
-          0% { transform: translateY(-20px) rotate(0); opacity: 0; }
-          15% { opacity: 1; }
-          100% { transform: translateY(600px) rotate(720deg); opacity: 0; }
-        }`}</style>
-      </div>
-    );
-  }
-
-  // =====================
-  // 9. IMPOSTOR REVEAL
-  // =====================
-  function ImpostorReveal({ state, dispatch }) {
-    return (
-      <div style={{ display: 'flex', flexDirection: 'column', height: '100%', justifyContent: 'space-between' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+      <div className="scene-full">
+        <div className="scene-head">
           <div>
-            <div className="eyebrow" style={{ color: 'var(--purple)' }}>◆ MODE: IMPOSTOR · ROUND 01</div>
-            <h2 className="h-display" style={{ fontSize: 40, margin: '6px 0 0', whiteSpace: 'nowrap' }}>Words have been dealt</h2>
+            <div className="eyebrow purple">◆ MODE: IMPOSTOR</div>
+            <h2 className="h-display" style={{ fontSize: 'clamp(28px, 4vw, 40px)', margin: '6px 0 0' }}>Words have been dealt</h2>
           </div>
-          <div className="bignum" style={{ fontSize: 64, color: 'var(--purple)', textShadow: 'var(--glow-p)' }}>
-            08
-          </div>
+          <div className="bignum purple-glow" style={{ fontSize: 64 }}>{String(seconds).padStart(2, '0')}</div>
         </div>
-
-        <div style={{ textAlign: 'center' }}>
-          <div className="eyebrow" style={{ marginBottom: 16, color: 'var(--ink-dim)' }}>
-            CHECK YOUR PHONE · DO NOT SHOW OTHERS
-          </div>
-          <div style={{ display: 'inline-flex', alignItems: 'center', gap: 40, padding: '32px 48px',
-            background: 'var(--panel)', border: '1px solid var(--purple)', boxShadow: 'var(--glow-p)' }}>
+        <div className="impostor-reveal-body">
+          <div className="eyebrow ink-dim">CHECK YOUR PHONE · DO NOT SHOW OTHERS</div>
+          <div className="theme-card purple-glow">
             <div>
-              <div className="mono" style={{ fontSize: 11, color: 'var(--ink-mute)', letterSpacing: '0.2em' }}>THEME</div>
-              <div className="h-display" style={{ fontSize: 36, marginTop: 4 }}>{impostor.theme}</div>
+              <div className="mono ink-mute label-min">THEME</div>
+              <div className="h-display" style={{ fontSize: 36 }}>{room.impostor.theme}</div>
             </div>
-            <div style={{ width: 1, height: 60, background: 'var(--purple)', boxShadow: 'var(--glow-p)' }}></div>
+            <div className="theme-divider"></div>
             <div>
-              <div className="mono" style={{ fontSize: 11, color: 'var(--ink-mute)', letterSpacing: '0.2em' }}>YOUR ROLE</div>
-              <div className="mono" style={{ fontSize: 18, marginTop: 4, color: 'var(--cyan)' }}>SECRET · UNIQUE PER PLAYER</div>
+              <div className="mono ink-mute label-min">YOUR ROLE</div>
+              <div className="mono cyan" style={{ fontSize: 18, marginTop: 4 }}>SECRET · UNIQUE PER PLAYER</div>
             </div>
           </div>
-        </div>
-
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12 }}>
-          {state.players.filter(p => p.connected).slice(0, 8).map(p => (
-            <div key={p.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: 10, background: 'var(--panel-2)', border: '1px solid var(--line)' }}>
-              <Avatar name={p.name} hue={p.hue} size="sm" />
-              <div style={{ flex: 1 }}>
-                <div style={{ fontWeight: 700, fontSize: 13 }}>{p.name}</div>
-                <div className="mono" style={{ fontSize: 9, color: 'var(--lime)', letterSpacing: '0.18em' }}>● READ</div>
-              </div>
-            </div>
-          ))}
-        </div>
-
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: 14, borderTop: '1px solid var(--line)' }}>
-          <div className="mono" style={{ fontSize: 11, color: 'var(--ink-mute)', letterSpacing: '0.15em' }}>
-            ◆ 1 IMPOSTOR HIDDEN AMONG 8 · WORD PAIR FROM 150+ BANK
-          </div>
-          <button className="btn btn-primary btn-sm" onClick={() => dispatch({ type: 'goto', scene: 'impostor-clues' })}>BEGIN CLUES →</button>
-        </div>
-      </div>
-    );
-  }
-
-  // =====================
-  // 10. IMPOSTOR CLUES
-  // =====================
-  function ImpostorClues({ state, dispatch }) {
-    return (
-      <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 18 }}>
-          <div>
-            <div className="eyebrow" style={{ color: 'var(--purple)' }}>◆ CLUE PHASE · ROUND 1/2</div>
-            <h2 className="h-display" style={{ fontSize: 38, margin: '6px 0 0', whiteSpace: 'nowrap' }}>Drop your hint</h2>
-          </div>
-          <div style={{ textAlign: 'right' }}>
-            <div className="mono" style={{ fontSize: 11, color: 'var(--ink-mute)', letterSpacing: '0.15em' }}>NOW UP</div>
-            <div className="h-display" style={{ fontSize: 28, color: 'var(--magenta)' }}>RETRO</div>
-          </div>
-        </div>
-
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24, flex: 1, minHeight: 0 }}>
-          {/* Clue stream */}
-          <div style={{ background: 'var(--panel)', border: '1px solid var(--line)', padding: 18, display: 'flex', flexDirection: 'column' }}>
-            <div className="eyebrow" style={{ marginBottom: 14 }}>CLUES GIVEN · {impostor.clues.length}</div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 12, flex: 1 }}>
-              {impostor.clues.map((c, i) => (
-                <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: 12, background: 'var(--panel-2)', border: '1px solid var(--line)' }}>
-                  <span className="mono" style={{ fontSize: 18, fontWeight: 700, color: 'var(--ink-mute)', width: 28 }}>0{i + 1}</span>
-                  <Avatar name={c.who} hue={c.hue} size="sm" />
-                  <div style={{ flex: 1 }}>
-                    <div className="mono" style={{ fontSize: 10, color: 'var(--ink-mute)', letterSpacing: '0.15em' }}>{c.who} SAYS</div>
-                    <div className="h-display" style={{ fontSize: 24, marginTop: 2 }}>"{c.word}"</div>
-                  </div>
-                  <div className="mono" style={{ fontSize: 10, color: 'var(--ink-mute)' }}>0.{8 + i}s</div>
-                </div>
-              ))}
-              <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: 12, background: 'var(--panel-2)', border: '2px dashed var(--magenta)' }}>
-                <span className="mono" style={{ fontSize: 18, fontWeight: 700, color: 'var(--magenta)', width: 28 }}>07</span>
-                <Avatar name="RETRO" hue={220} size="sm" />
+          <div className="impostor-grid">
+            {room.players.filter(p => p.connected).map(p => (
+              <div key={p.id} className="player-chip mini">
+                <Avatar name={p.name} hue={p.hue} shape={p.shape} size="sm" />
                 <div style={{ flex: 1 }}>
-                  <div className="mono" style={{ fontSize: 10, color: 'var(--magenta)', letterSpacing: '0.15em' }}>RETRO IS TYPING…</div>
-                  <Soundwave color="#ff2e88" bars={14} />
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Turn order + meta */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-            <div style={{ padding: 18, background: 'var(--panel)', border: '1px solid var(--line)' }}>
-              <div className="eyebrow" style={{ marginBottom: 12 }}>TURN ORDER</div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                {['BLAZE', 'PIXEL', 'NEON', 'VOID', 'GLITCH', 'RETRO', 'AURA', 'ZAP'].map((n, i) => {
-                  const done = i < 6;
-                  const now = i === 5;
-                  return (
-                    <div key={n} style={{
-                      display: 'flex', alignItems: 'center', gap: 10,
-                      padding: '8px 12px',
-                      background: now ? 'var(--magenta)' : done ? 'transparent' : 'var(--panel-2)',
-                      color: now ? '#1a0210' : done ? 'var(--ink-mute)' : 'var(--ink)',
-                      border: '1px solid var(--line)',
-                    }}>
-                      <span className="mono" style={{ fontSize: 11, width: 18 }}>{done ? '✓' : now ? '▸' : '○'}</span>
-                      <span style={{ fontWeight: 700, fontSize: 13, flex: 1 }}>{n}</span>
-                      <span className="mono" style={{ fontSize: 10, opacity: 0.7 }}>{done ? 'DONE' : now ? 'NOW' : '—'}</span>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-
-            <div style={{ padding: 18, background: 'var(--panel)', border: '1px solid var(--purple)', boxShadow: 'var(--glow-p)' }}>
-              <div className="eyebrow" style={{ color: 'var(--purple)', marginBottom: 8 }}>RULES</div>
-              <ul className="mono" style={{ margin: 0, padding: 0, listStyle: 'none', fontSize: 12, color: 'var(--ink-dim)', lineHeight: 1.8, letterSpacing: '0.02em' }}>
-                <li>▸ One word only. No phrases.</li>
-                <li>▸ Vague to fool the impostor.</li>
-                <li>▸ Clear enough so crew knows.</li>
-                <li>▸ 2 rounds, then vote.</li>
-              </ul>
-            </div>
-          </div>
-        </div>
-
-        <div style={{ display: 'flex', justifyContent: 'flex-end', paddingTop: 14 }}>
-          <button className="btn btn-cyan btn-sm" onClick={() => dispatch({ type: 'goto', scene: 'impostor-vote' })}>BEGIN VOTE →</button>
-        </div>
-      </div>
-    );
-  }
-
-  // =====================
-  // 11. IMPOSTOR VOTE
-  // =====================
-  function ImpostorVote({ state, dispatch }) {
-    return (
-      <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 14 }}>
-          <div>
-            <div className="eyebrow" style={{ color: 'var(--magenta)' }}>◆ VOTE PHASE</div>
-            <h2 className="h-display" style={{ fontSize: 40, margin: '6px 0 0', whiteSpace: 'nowrap' }}>Who's the impostor?</h2>
-            <div className="mono" style={{ fontSize: 12, color: 'var(--ink-mute)', marginTop: 6, letterSpacing: '0.1em' }}>
-              REVIEW THE CLUES · CAST ON YOUR PHONE · MAJORITY DECIDES
-            </div>
-          </div>
-          <TimerRing seconds={12} total={20} size={84} color="magenta" />
-        </div>
-
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12, marginBottom: 16 }}>
-          {voteResults.concat(state.players.filter(p => p.connected && !voteResults.find(v => v.id === p.id))).slice(0, 8).map(p => {
-            const votes = p.votes ?? 0;
-            return (
-              <div key={p.id} className="vote-tile" style={{ borderColor: votes > 0 ? 'var(--magenta)' : 'var(--line)' }}>
-                <Avatar name={p.name} hue={p.hue} size="lg" />
-                <div style={{ fontWeight: 700, fontSize: 14, letterSpacing: '0.02em' }}>{p.name}</div>
-                <div style={{ width: '100%', display: 'flex', gap: 3, justifyContent: 'center' }}>
-                  {Array.from({ length: 8 }).map((_, i) => (
-                    <div key={i} style={{
-                      width: 8, height: 14,
-                      background: i < votes ? 'var(--magenta)' : 'var(--panel-3)',
-                      boxShadow: i < votes ? 'var(--glow-m)' : 'none',
-                    }}></div>
-                  ))}
-                </div>
-                <div className="mono" style={{ fontSize: 11, color: votes > 0 ? 'var(--magenta)' : 'var(--ink-mute)' }}>
-                  {votes} VOTE{votes !== 1 ? 'S' : ''}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-
-        <div style={{ background: 'var(--panel)', border: '1px solid var(--line)', padding: 14, display: 'flex', flexDirection: 'column', gap: 10, flex: 1, minHeight: 0 }}>
-          <div className="eyebrow">CLUE RECAP · ROUND 1</div>
-          <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-            {impostor.clues.map((c, i) => (
-              <div key={i} style={{
-                display: 'flex', alignItems: 'center', gap: 8,
-                padding: '8px 14px',
-                background: 'var(--panel-2)',
-                border: `1px solid ${c.role === 'impostor' ? 'var(--magenta)' : 'var(--line)'}`,
-              }}>
-                <Avatar name={c.who} hue={c.hue} size="sm" />
-                <div>
-                  <div className="mono" style={{ fontSize: 9, color: 'var(--ink-mute)', letterSpacing: '0.15em' }}>{c.who}</div>
-                  <div style={{ fontWeight: 700, fontSize: 14 }}>"{c.word}"</div>
+                  <div className="nm small">{p.name}</div>
+                  <div className="mono lime small">● READ</div>
                 </div>
               </div>
             ))}
           </div>
         </div>
-
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: 14 }}>
-          <div className="mono" style={{ fontSize: 11, color: 'var(--ink-mute)', letterSpacing: '0.15em' }}>
-            ◆ 6/8 VOTED · WAITING FOR AURA, ZAP
-          </div>
-          <button className="btn btn-magenta btn-primary btn-sm" onClick={() => dispatch({ type: 'goto', scene: 'impostor-result' })}>LOCK VOTE →</button>
+        <div className="scene-foot end">
+          <button className="btn btn-primary btn-sm" onClick={() => QQ.actions.advancePhase()}>BEGIN CLUES →</button>
         </div>
       </div>
     );
   }
 
-  // =====================
-  // 12. IMPOSTOR RESULT
-  // =====================
-  function ImpostorResult({ state, dispatch }) {
+  function ImpostorClues({ room }) {
+    const im = room.impostor;
+    const seconds = useCountdown(room.phaseEndsAt) || 0;
+    const currentPlayer = room.players.find(p => p.id === im.currentTurnPlayerId);
+    const total = im.turnOrder.length * im.cluesPerPlayer;
     return (
-      <div style={{ display: 'flex', flexDirection: 'column', height: '100%', position: 'relative' }}>
-        <Confetti />
-        <div style={{ textAlign: 'center', marginBottom: 18 }}>
-          <div className="eyebrow" style={{ color: 'var(--lime)', textShadow: 'var(--glow-l)', marginBottom: 8 }}>
-            ◆ THE CREW WINS — IMPOSTOR FOUND ◆
+      <div className="scene-full">
+        <div className="scene-head">
+          <div>
+            <div className="eyebrow purple">◆ CLUE PHASE</div>
+            <h2 className="h-display" style={{ fontSize: 'clamp(26px, 3.5vw, 38px)', margin: '6px 0 0' }}>Drop your hint</h2>
           </div>
-          <h2 className="h-display" style={{
-            fontSize: 64, margin: 0,
-            background: 'linear-gradient(180deg, #c8ff2b, #00e6ff)',
-            WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent',
-          }}>
-            NEON was the impostor
-          </h2>
+          <div className="row gap" style={{ alignItems: 'center' }}>
+            {currentPlayer && (
+              <div className="now-up">
+                <div className="mono ink-mute small">NOW UP</div>
+                <div className="h-display" style={{ fontSize: 26, color: 'var(--magenta)' }}>{currentPlayer.name}</div>
+              </div>
+            )}
+            <TimerRing seconds={seconds} total={25} size={72} color="magenta" />
+          </div>
         </div>
-
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, flex: 1, minHeight: 0 }}>
-          {/* Word pair reveal */}
-          <div style={{ background: 'var(--panel)', border: '1px solid var(--cyan)', boxShadow: 'var(--glow-c)', padding: 24 }}>
-            <div className="eyebrow" style={{ color: 'var(--cyan)', marginBottom: 16 }}>WORD PAIR · {impostor.theme}</div>
-            <div style={{ display: 'flex', alignItems: 'stretch', gap: 0 }}>
-              <div style={{ flex: 1, padding: '20px 24px', background: 'var(--panel-2)', borderLeft: '4px solid var(--lime)' }}>
-                <div className="mono" style={{ fontSize: 10, color: 'var(--ink-mute)', letterSpacing: '0.2em' }}>CREW WORD</div>
-                <div className="h-display" style={{ fontSize: 44, color: 'var(--lime)', textShadow: 'var(--glow-l)', marginTop: 6 }}>
-                  {impostor.crewWord}
-                </div>
-              </div>
-              <div style={{ width: 40, display: 'grid', placeItems: 'center', color: 'var(--ink-mute)', fontFamily: 'JetBrains Mono', fontSize: 18 }}>vs</div>
-              <div style={{ flex: 1, padding: '20px 24px', background: 'var(--panel-2)', borderLeft: '4px solid var(--magenta)' }}>
-                <div className="mono" style={{ fontSize: 10, color: 'var(--ink-mute)', letterSpacing: '0.2em' }}>IMPOSTOR WORD</div>
-                <div className="h-display" style={{ fontSize: 44, color: 'var(--magenta)', textShadow: 'var(--glow-m)', marginTop: 6 }}>
-                  {impostor.impostorWord}
-                </div>
-              </div>
-            </div>
-
-            <div className="eyebrow" style={{ marginTop: 24, marginBottom: 10 }}>FINAL VOTE TALLY</div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              {voteResults.map(v => (
-                <div key={v.id} style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                  <Avatar name={v.name} hue={v.hue} size="sm" />
-                  <div style={{ flex: 1 }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
-                      <span style={{ fontWeight: 700, fontSize: 13 }}>{v.name}</span>
-                      <span className="mono" style={{ fontSize: 11, color: 'var(--ink-mute)' }}>{v.votes} votes</span>
-                    </div>
-                    <Bar value={v.votes} max={6} color={v.id === impostor.impostorId ? 'lime' : 'magenta'} height={10} />
+        <div className="impostor-clues-grid">
+          <div className="card panel">
+            <div className="eyebrow" style={{ marginBottom: 14 }}>CLUES GIVEN · {im.clues.length}/{total}</div>
+            <div className="clue-stream">
+              {im.clues.map((c, i) => (
+                <div key={i} className="clue-row">
+                  <span className="mono ink-mute clue-num">0{i + 1}</span>
+                  <Avatar name={c.name} hue={c.hue} size="sm" />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div className="mono ink-mute small">{c.name} SAYS</div>
+                    <div className="h-display" style={{ fontSize: 22, marginTop: 2 }}>"{c.word}"</div>
                   </div>
                 </div>
               ))}
+              {currentPlayer && (
+                <div className="clue-row typing">
+                  <span className="mono magenta clue-num">{String(im.clues.length + 1).padStart(2, '0')}</span>
+                  <Avatar name={currentPlayer.name} hue={currentPlayer.hue} size="sm" />
+                  <div style={{ flex: 1 }}>
+                    <div className="mono magenta small">{currentPlayer.name} IS TYPING…</div>
+                    <Soundwave color="#ff2e88" bars={14} />
+                  </div>
+                </div>
+              )}
             </div>
           </div>
+          <div className="card panel">
+            <div className="eyebrow" style={{ marginBottom: 12 }}>TURN ORDER</div>
+            <div className="turn-order">
+              {im.turnOrder.map((pid, i) => {
+                const p = room.players.find(x => x.id === pid);
+                const done = i < im.currentTurnIndex;
+                const now = i === im.currentTurnIndex;
+                return (
+                  <div key={pid + i} className={`turn-row ${now ? 'now' : ''} ${done ? 'done' : ''}`}>
+                    <span className="mono small">{done ? '✓' : now ? '▸' : '○'}</span>
+                    <span className="nm small" style={{ flex: 1 }}>{p?.name || '?'}</span>
+                    <span className="mono small ink-mute">{done ? 'DONE' : now ? 'NOW' : '—'}</span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+        <div className="scene-foot end">
+          <button className="btn btn-ghost btn-sm" onClick={() => QQ.actions.advancePhase()}>SKIP TO VOTE →</button>
+        </div>
+      </div>
+    );
+  }
 
-          {/* Bonus guess */}
-          <div style={{ background: 'var(--panel)', border: '1px solid var(--magenta)', boxShadow: 'var(--glow-m)', padding: 24, display: 'flex', flexDirection: 'column' }}>
-            <div className="eyebrow" style={{ color: 'var(--magenta)', marginBottom: 12 }}>BONUS · IMPOSTOR'S LAST CHANCE</div>
-            <p className="h-display" style={{ fontSize: 22, margin: 0, lineHeight: 1.25 }}>
-              NEON gets one guess at the crew's word.<br/>
-              <span style={{ color: 'var(--ink-mute)' }}>Correct → steals the win.</span>
-            </p>
+  function ImpostorVote({ room }) {
+    const im = room.impostor;
+    const seconds = useCountdown(room.phaseEndsAt) || 0;
+    const connected = room.players.filter(p => p.connected);
+    const totalVotes = im.voteCount;
+    return (
+      <div className="scene-full">
+        <div className="scene-head">
+          <div>
+            <div className="eyebrow magenta-glow">◆ VOTE PHASE</div>
+            <h2 className="h-display" style={{ fontSize: 'clamp(28px, 4vw, 40px)', margin: '6px 0 0' }}>Who's the impostor?</h2>
+            <div className="mono ink-mute small" style={{ marginTop: 6 }}>
+              REVIEW THE CLUES · CAST ON YOUR PHONE · MAJORITY DECIDES
+            </div>
+          </div>
+          <TimerRing seconds={seconds} total={30} size={84} color="magenta" />
+        </div>
+        <div className="vote-grid">
+          {connected.map(p => {
+            // Show vote received count (only after resolution); during vote, just show submitted count
+            const voted = totalVotes;
+            return (
+              <div key={p.id} className="vote-tile" style={{ borderColor: 'var(--line)' }}>
+                <Avatar name={p.name} hue={p.hue} shape={p.shape} size="lg" />
+                <div className="nm small">{p.name}</div>
+                <div className="mono ink-mute small">awaiting…</div>
+              </div>
+            );
+          })}
+        </div>
+        <div className="card panel" style={{ marginTop: 12 }}>
+          <div className="eyebrow">CLUE RECAP</div>
+          <div className="row wrap gap" style={{ marginTop: 10 }}>
+            {im.clues.map((c, i) => (
+              <div key={i} className="clue-recap">
+                <Avatar name={c.name} hue={c.hue} size="sm" />
+                <div>
+                  <div className="mono ink-mute small">{c.name}</div>
+                  <div className="nm">"{c.word}"</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+        <div className="scene-foot">
+          <div className="mono ink-mute">◆ {totalVotes}/{connected.length} VOTED</div>
+          <button className="btn btn-primary btn-sm" onClick={() => QQ.actions.advancePhase()}>LOCK VOTES →</button>
+        </div>
+      </div>
+    );
+  }
 
-            <div style={{ marginTop: 20, padding: 20, background: 'var(--panel-2)', border: '1px dashed var(--magenta)' }}>
-              <div className="eyebrow" style={{ marginBottom: 8, color: 'var(--magenta)' }}>NEON IS GUESSING…</div>
-              <div className="h-display" style={{ fontSize: 36 }}>
-                "RAVIOLI<span className="flicker">_</span>"
+  function ImpostorBonus({ room }) {
+    const seconds = useCountdown(room.phaseEndsAt) || 0;
+    const im = room.impostor;
+    const impostor = room.players.find(p => p.id === im.impostorId);
+    return (
+      <div className="scene-full">
+        <div className="scene-head">
+          <div>
+            <div className="eyebrow magenta-glow">◆ BONUS · IMPOSTOR'S LAST CHANCE</div>
+            <h2 className="h-display" style={{ fontSize: 'clamp(28px, 4vw, 42px)', margin: '6px 0 0' }}>
+              {impostor ? impostor.name : 'Impostor'} guesses the crew's word
+            </h2>
+          </div>
+          <TimerRing seconds={seconds} total={25} size={84} color="magenta" />
+        </div>
+        <div className="bonus-body">
+          <div className="card panel bracket m" style={{ padding: 32 }}>
+            <div className="mono ink-mute label-min">CORRECT → STEALS THE WIN · WRONG → CREW BONUS</div>
+            <div className="h-display" style={{ fontSize: 60, color: 'var(--magenta)', textShadow: 'var(--glow-m)', marginTop: 16 }}>
+              "<span className="flicker">_</span>"
+            </div>
+            <div className="mono ink-mute" style={{ marginTop: 14 }}>Watching the impostor's phone…</div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  function ImpostorResult({ room }) {
+    const im = room.impostor;
+    const impostor = room.players.find(p => p.id === im.impostorId);
+    const eliminated = room.players.find(p => p.id === im.eliminatedId);
+    const crewWon = im.outcome === 'crew-wins';
+    return (
+      <div className="scene-full">
+        <Confetti />
+        <div className="scene-head center">
+          <div className="eyebrow lime-glow">◆ {im.outcome === 'crew-wins' ? 'THE CREW WINS' : im.outcome === 'impostor-wins' ? 'IMPOSTOR ESCAPES' : 'IMPOSTOR STEALS THE WIN'} ◆</div>
+          <h2 className="h-display result-headline">
+            {impostor?.name || '?'} was the impostor
+          </h2>
+        </div>
+        <div className="impostor-result-grid">
+          <div className="card panel cyan-border">
+            <div className="eyebrow cyan-glow">WORD PAIR · {room.impostor.theme}</div>
+            <div className="word-pair">
+              <div className="word-side crew">
+                <div className="mono ink-mute label-min">CREW WORD</div>
+                <div className="h-display lime-text">{im.crewWord}</div>
+              </div>
+              <div className="word-vs mono">vs</div>
+              <div className="word-side impostor">
+                <div className="mono ink-mute label-min">IMPOSTOR WORD</div>
+                <div className="h-display magenta-text">{im.impostorWord}</div>
               </div>
             </div>
-
-            <div style={{ marginTop: 20, padding: 16, background: 'linear-gradient(180deg, rgba(200,255,43,0.1), transparent)', border: '1px solid var(--lime)' }}>
-              <div className="eyebrow" style={{ color: 'var(--lime)', marginBottom: 6 }}>RESULT</div>
-              <div style={{ fontWeight: 700, fontSize: 18 }}>Wrong! Crew word was <span style={{ color: 'var(--lime)' }}>{impostor.crewWord}</span>.</div>
-              <div className="mono" style={{ fontSize: 11, color: 'var(--ink-dim)', marginTop: 6 }}>+200 pts to every surviving crew member.</div>
+            <div className="eyebrow" style={{ marginTop: 24, marginBottom: 10 }}>FINAL VOTE TALLY</div>
+            <div className="vote-tally">
+              {Object.entries(im.tally || {}).map(([pid, n]) => {
+                const p = room.players.find(x => x.id === pid);
+                if (!p) return null;
+                return (
+                  <div key={pid} className="vote-tally-row">
+                    <Avatar name={p.name} hue={p.hue} size="sm" />
+                    <div style={{ flex: 1 }}>
+                      <div className="row spread">
+                        <span className="nm small">{p.name}{pid === im.impostorId && <span className="mono magenta small"> · IMPOSTOR</span>}</span>
+                        <span className="mono ink-mute small">{n} votes</span>
+                      </div>
+                      <Bar value={n} max={Math.max(1, ...Object.values(im.tally || { _: 1 }))}
+                        color={pid === im.impostorId ? 'lime' : 'magenta'} height={8} />
+                    </div>
+                  </div>
+                );
+              })}
             </div>
-
-            <div style={{ marginTop: 'auto', display: 'flex', gap: 10, justifyContent: 'flex-end', paddingTop: 16 }}>
-              <button className="btn btn-ghost btn-sm" onClick={() => dispatch({ type: 'goto', scene: 'lobby' })}>BACK TO LOBBY</button>
-              <button className="btn btn-primary btn-sm" onClick={() => dispatch({ type: 'goto', scene: 'impostor-reveal' })}>NEXT ROUND →</button>
+          </div>
+          <div className="card panel magenta-border">
+            <div className="eyebrow magenta-glow">BONUS GUESS</div>
+            {im.bonusGuess ? (
+              <>
+                <div className="mono ink-mute" style={{ marginTop: 12 }}>{impostor?.name || 'Impostor'} guessed</div>
+                <div className="h-display" style={{ fontSize: 44, marginTop: 6 }}>"{im.bonusGuess.word}"</div>
+                <div className="card panel" style={{
+                  marginTop: 16, padding: 14,
+                  background: im.bonusGuess.correct
+                    ? 'linear-gradient(180deg, rgba(255,46,136,0.2), transparent)'
+                    : 'linear-gradient(180deg, rgba(200,255,43,0.15), transparent)',
+                  border: im.bonusGuess.correct ? '1px solid var(--magenta)' : '1px solid var(--lime)',
+                }}>
+                  <div className="eyebrow" style={{ color: im.bonusGuess.correct ? 'var(--magenta)' : 'var(--lime)' }}>RESULT</div>
+                  <div className="nm" style={{ marginTop: 6 }}>
+                    {im.bonusGuess.correct
+                      ? `Correct! Impostor stole the win.`
+                      : `Wrong! Crew word was ${im.crewWord}.`}
+                  </div>
+                  <div className="mono ink-mute small" style={{ marginTop: 6 }}>
+                    {im.bonusGuess.correct
+                      ? `+750 to ${impostor?.name}`
+                      : `+500 crew win · +200 bonus to surviving crew`}
+                  </div>
+                </div>
+              </>
+            ) : crewWon ? (
+              <div className="mono ink-mute" style={{ marginTop: 12 }}>No bonus guess submitted in time.</div>
+            ) : (
+              <div className="mono ink-mute" style={{ marginTop: 12 }}>
+                The impostor was not caught. No bonus.<br />
+                +1000 to {impostor?.name}.
+              </div>
+            )}
+            <div className="row gap end" style={{ marginTop: 'auto', paddingTop: 20 }}>
+              <button className="btn btn-ghost btn-sm" onClick={() => QQ.actions.resetGame()}>BACK TO LOBBY</button>
+              <button className="btn btn-primary btn-sm" onClick={() => QQ.actions.advancePhase()}>NEXT ROUND →</button>
             </div>
           </div>
         </div>

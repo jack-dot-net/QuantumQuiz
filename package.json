@@ -2,9 +2,17 @@
   "name": "quantumquiz",
   "version": "1.0.0",
   "private": true,
-  "description": "QuantumQuiz — retro-arcade multiplayer trivia & impostor prototype",
+  "description": "QuantumQuiz — retro-arcade real-time multiplayer trivia + social-deduction party game",
+  "main": "server/index.js",
   "scripts": {
-    "start": "npx --yes serve public -l ${PORT:-3000}",
-    "dev": "npx --yes serve public -l 3000"
+    "start": "node server/index.js",
+    "dev": "node server/index.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "express": "^4.21.2",
+    "socket.io": "^4.8.1"
   }
 }

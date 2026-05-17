@@ -1,21 +1,14 @@
 services:
   - type: web
     name: quantumquiz
-    runtime: static
-    buildCommand: ""
-    staticPublishPath: ./public
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: node server/index.js
+    healthCheckPath: /healthz
     pullRequestPreviewsEnabled: true
-    headers:
-      - path: /*
-        name: X-Frame-Options
-        value: SAMEORIGIN
-      - path: /*
-        name: X-Content-Type-Options
-        value: nosniff
-      - path: /*.jsx
-        name: Content-Type
-        value: text/babel; charset=utf-8
-    routes:
-      - type: rewrite
-        source: /*
-        destination: /index.html
+    envVars:
+      - key: NODE_VERSION
+        value: "20"
+      - key: NODE_ENV
+        value: production
