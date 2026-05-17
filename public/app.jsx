@@ -61,7 +61,12 @@ function Landing() {
         </div>
 
         <div className="landing-meta bottom">
-          <span className="mono">© 2026 QQ.GAMES · MIT</span>
+          <span className="mono">
+            © 2026 JDNSoftware ·{' '}
+            <a href="https://jdnsoftware.onrender.com/" target="_blank" rel="noopener noreferrer">
+              jdnsoftware.onrender.com
+            </a>
+          </span>
           <Soundwave color="#00e6ff" bars={20} />
         </div>
       </div>
