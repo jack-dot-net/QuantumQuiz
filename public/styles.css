@@ -60,17 +60,8 @@ a { color: var(--cyan); text-decoration: none; }
   min-height: 100vh;
   min-height: 100dvh;
 }
-.qq-root::before {
-  content: ''; position: fixed; inset: 0; pointer-events: none; z-index: 100;
-  background-image: repeating-linear-gradient(
-    to bottom, rgba(255,255,255,0.022) 0, rgba(255,255,255,0.022) 1px,
-    transparent 1px, transparent 3px);
-  mix-blend-mode: overlay;
-}
-.qq-root::after {
-  content: ''; position: fixed; inset: 0; pointer-events: none; z-index: 99;
-  background: radial-gradient(ellipse at center, transparent 55%, rgba(0,0,0,0.65) 100%);
-}
+.qq-root::before { display: none; }
+.qq-root::after { display: none; }
 
 /* ===== Boot splash ===== */
 .boot-splash {
@@ -431,18 +422,8 @@ a { color: var(--cyan); text-decoration: none; }
     inset 0 0 0 1px #2a1f55,
     0 30px 60px rgba(0,0,0,0.6);
 }
-.tv-screen::before {
-  content: ''; position: absolute; inset: 0;
-  background-image: repeating-linear-gradient(
-    to bottom, rgba(0,0,0,0) 0, rgba(0,0,0,0) 2px,
-    rgba(0,0,0,0.3) 2px, rgba(0,0,0,0.3) 3px);
-  pointer-events: none; z-index: 30; mix-blend-mode: multiply;
-}
-.tv-screen::after {
-  content: ''; position: absolute; inset: 0;
-  background: radial-gradient(ellipse at center, transparent 55%, rgba(0,0,0,0.55) 100%);
-  pointer-events: none; z-index: 31;
-}
+.tv-screen::before { display: none; }
+.tv-screen::after { display: none; }
 .tv-inner { position: relative; inset: auto; width: 100%; min-height: 100%; padding: clamp(18px, 3vw, 36px); display: flex; flex-direction: column; }
 .host-footbar {
   display: flex; align-items: center; gap: 14px;
@@ -801,14 +782,7 @@ a { color: var(--cyan); text-decoration: none; }
   position: relative;
   overflow: hidden;
 }
-.player-stage::before {
-  content: ''; position: absolute; inset: 0;
-  background-image: repeating-linear-gradient(
-    to bottom, rgba(0,0,0,0) 0, rgba(0,0,0,0) 2px,
-    rgba(0,0,0,0.22) 2px, rgba(0,0,0,0.22) 3px);
-  pointer-events: none; z-index: 1; mix-blend-mode: multiply;
-}
-.player-stage > * { position: relative; z-index: 2; }
+.player-stage::before { display: none; }
 
 .p-scene {
   display: flex; flex-direction: column; gap: 12px;
