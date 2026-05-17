@@ -17,8 +17,10 @@ const ROOT = join(__dirname, '..');
 const SRC = join(ROOT, 'client-src');
 const OUT = join(ROOT, 'public', 'build');
 
-// Load order (matches the previous individual <script> tags in index.html)
+// Load order (matches the previous individual <script> tags in index.html).
+// anti-devtools must run first so its handlers attach before any UI exists.
 const SOURCES = [
+  'anti-devtools.js',
   'client-state.js',
   'shared.jsx',
   'host.jsx',
